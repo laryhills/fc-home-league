@@ -143,6 +143,29 @@ table.lt{width:100%;border-collapse:collapse;font-size:16px;min-width:460px}
 .statsbody .tablewrap{margin:0}
 table.lt.slim{min-width:340px}
 .statsbody .note{color:var(--mute);font-size:15px}
+.crest{display:inline-block;width:20px;height:20px;vertical-align:-5px;margin-right:6px;flex:none}
+.crest img{width:100%;height:100%;object-fit:contain;display:block}
+.crest.x{border-radius:50%;background:var(--line);color:var(--text);font:700 9px/20px var(--body);text-align:center}
+.crest.x::before{content:attr(data-i)}
+.crest.x img{display:none}
+.combo{position:relative}
+.tlist{position:absolute;left:0;right:0;top:calc(100% + 4px);z-index:20;margin:0;padding:6px;list-style:none;background:var(--raise);border:1px solid var(--accent);border-radius:var(--r-sm);max-height:min(340px,50vh);overflow-y:auto;box-shadow:0 12px 30px rgba(0,0,0,.55)}
+.tlist[hidden]{display:none}
+.topt{display:flex;align-items:center;gap:10px;padding:8px 10px;border-radius:6px;cursor:pointer;min-height:46px}
+.topt:hover,.topt.hl{background:var(--panel)}
+.topt .nm{flex:1;min-width:0;overflow-wrap:anywhere}
+.topt small{color:var(--mute);font-size:13px;text-align:right}
+.topt .crest{width:28px;height:28px;margin:0}
+.topt .crest.x{font-size:11px;line-height:28px}
+.topt.taken{opacity:.45;cursor:not-allowed}
+.topt.custom{color:var(--accent);border-top:1px solid var(--line);border-radius:0 0 6px 6px;margin-top:4px}
+.pickhint{color:var(--mute);font-size:15px;margin-top:8px}
+.pickhint:empty{display:none}
+.pickhint .crest{width:24px;height:24px;vertical-align:-7px}
+.teams{margin-top:18px;padding:0}
+.teams>summary{list-style:none;cursor:pointer;display:flex;justify-content:space-between;align-items:baseline;gap:10px;padding:14px 16px}
+.teams>summary::-webkit-details-marker{display:none}
+.teamsbody{padding:0 16px 16px;display:grid;gap:12px}
 @media (max-width:520px){
   .match{gap:8px}
   .led{font-size:24px;padding:6px 10px}
@@ -190,6 +213,181 @@ const fmt=n=>n>0?'+'+n:String(n);
 const touch=L=>{L.updated=Date.now();};
 const fmtTime=t=>t?new Date(t).toLocaleString([],{dateStyle:'medium',timeStyle:'short'}):'unknown';
 const stampOf=L=>L.updated||L.created||0;
+
+/* ---------- Teams data (football-data.org) ---------- */
+const norm2=s=>String(s).normalize('NFD').replace(/[\u0300-\u036f]/g,'').toLowerCase().replace(/\s+/g,' ').trim();
+function safeCrest(u){
+  if(typeof u!=='string'||u.length>300) return null;
+  try{
+    const x=new URL(u);
+    if(x.protocol!=='https:') return null;
+    if(x.hostname.endsWith('football-data.org')||x.hostname.endsWith('.wikimedia.org')) return u;
+  }catch(e){}
+  return null;
+}
+const initials=s=>String(s).split(/[^A-Za-z0-9]+/).filter(Boolean).slice(0,2).map(w=>w[0].toUpperCase()).join('')||'?';
+function crestHtml(url,name){
+  if(!url) return '';
+  return '<span class="crest" data-i="'+esc(initials(name))+'"><img src="'+esc(url)+'" alt="" loading="lazy" referrerpolicy="no-referrer" onerror="this.parentNode.classList.add(\'x\')"></span>';
+}
+const crest=p=>crestHtml(p.badge,p.team);
+
+const SETTINGS_KEY='fc27-settings-v1',TEAMS_KEY='fc27-teams-v1';
+function readJSON(k,def){
+  try{const d=JSON.parse(localStorage.getItem(k));return d&&typeof d==='object'?d:def;}catch(e){return def;}
+}
+let settings=Object.assign({token:''},readJSON(SETTINGS_KEY,{}));
+function saveSettings(){try{localStorage.setItem(SETTINGS_KEY,JSON.stringify(settings));}catch(e){}}
+const hayOf=t=>norm2(t.n+' '+t.f+' '+t.t+' '+t.a);
+function loadTeamCache(){
+  const d=readJSON(TEAMS_KEY,{});
+  const teams=[];
+  (Array.isArray(d.teams)?d.teams:[]).forEach(t=>{
+    if(!t||!Number.isInteger(t.id)||typeof t.n!=='string'||!t.n) return;
+    const r={id:t.id,n:t.n.slice(0,40),f:String(t.f||t.n).slice(0,60),t:String(t.t||'').slice(0,5),c:safeCrest(t.c),k:t.k==='national'?'national':'club',a:String(t.a||'').slice(0,40)};
+    r.h=hayOf(r);
+    teams.push(r);
+  });
+  return {teams:teams,updated:Number.isFinite(d.updated)?d.updated:0};
+}
+let teamCache=loadTeamCache();
+function saveTeams(){
+  try{
+    localStorage.setItem(TEAMS_KEY,JSON.stringify({updated:teamCache.updated,teams:teamCache.teams.map(t=>({id:t.id,n:t.n,f:t.f,t:t.t,c:t.c,k:t.k,a:t.a}))}));
+  }catch(e){toast('Could not save the team list. Storage is full.');}
+}
+const teamById=id=>teamCache.teams.find(t=>t.id===id);
+function searchTeams(q){
+  const out=[];
+  for(const t of teamCache.teams){
+    let s=-1;
+    if(norm2(t.n).indexOf(q)===0) s=0;
+    else if((' '+t.h).indexOf(' '+q)>=0) s=1;
+    else if(t.h.indexOf(q)>=0) s=2;
+    if(s>=0) out.push({t:t,s:s});
+  }
+  out.sort((x,y)=>(x.s-y.s)||x.t.n.localeCompare(y.t.n));
+  return out.slice(0,40).map(o=>o.t);
+}
+
+const API='https://api.football-data.org/v4';
+const COMPS=[['PL','club'],['PD','club'],['BL1','club'],['SA','club'],['FL1','club'],['DED','club'],['PPL','club'],['ELC','club'],['BSA','club'],['CL','club'],['WC','national'],['EC','national']];
+const sleep=ms=>new Promise(r=>setTimeout(r,ms));
+function teamsStatus(){
+  if(ui.loadMsg) return ui.loadMsg;
+  return teamCache.teams.length?teamCache.teams.length+' teams saved on this device. Last loaded '+fmtTime(teamCache.updated)+'.':'No teams loaded yet.';
+}
+function setStatus(msg){
+  ui.loadMsg=msg;
+  const el=$('#tstatus');
+  if(el) el.textContent=teamsStatus();
+}
+const hdrNum=(res,name)=>{
+  const v=(res&&res.headers&&res.headers.get)?res.headers.get(name):null;
+  const n=v==null?NaN:parseInt(v,10);
+  return Number.isFinite(n)?n:null;
+};
+async function loadTeams(token){
+  if(ui.loading) return;
+  ui.loading=true;
+  const map=new Map(teamCache.teams.map(t=>[t.id,t]));
+  const NETERR='Could not reach football-data.org. You may be offline, or the browser blocked the request.';
+  let stop=null;
+  // Pace requests by the API's own rate-limit headers when the browser lets us read them,
+  // otherwise fall back to a fixed gap that stays under 10 requests a minute.
+  const pace=async(res,last)=>{
+    if(last) return;
+    const left=hdrNum(res,'X-RequestsAvailable'),reset=hdrNum(res,'X-RequestCounter-Reset');
+    if(left!==null){
+      if(left<=0){
+        const s=(reset!==null?reset:60)+1;
+        setStatus('Rate limit reached, waiting '+s+' seconds...');
+        await sleep(s*1000);
+      }else await sleep(250);
+    }else await sleep(6500);
+  };
+  const get=async path=>{
+    let tries=0;
+    while(true){
+      const res=await fetch(API+path,{headers:{'X-Auth-Token':token}});
+      if(res.status===429&&tries<2){
+        tries++;
+        const r=hdrNum(res,'X-RequestCounter-Reset');
+        const s=(r!==null?r:60)+1;
+        setStatus('Rate limit reached, waiting '+s+' seconds...');
+        await sleep(s*1000);
+        continue;
+      }
+      return res;
+    }
+  };
+  // 1) Which competitions can this token see? One request. An unknown token is treated as anonymous.
+  let accessible=null;
+  try{
+    setStatus('Checking your plan...');
+    const r0=await get('/competitions');
+    const who=(r0.headers&&r0.headers.get)?r0.headers.get('X-Authenticated-Client'):null;
+    if(who&&String(who).toLowerCase()==='anonymous') stop='The token was not recognised (the API sees you as anonymous). Check it and try again.';
+    else if(r0.ok){
+      let d=null;
+      try{d=await r0.json();}catch(e){}
+      if(d&&Array.isArray(d.competitions)) accessible=new Set(d.competitions.map(c=>c.code));
+    }
+    if(!stop) await pace(r0,false);
+  }catch(e){stop=NETERR;}
+  const wanted=COMPS.filter(c=>!accessible||accessible.has(c[0]));
+  const notOnPlan=COMPS.filter(c=>accessible&&!accessible.has(c[0])).map(c=>c[0]);
+  const failed=[],deniedCodes=[];
+  let attempted=0;
+  // 2) Teams for each competition
+  for(let i=0;i<wanted.length&&!stop;i++){
+    const code=wanted[i][0],kind=wanted[i][1];
+    setStatus('Loading '+(i+1)+' of '+wanted.length+' ('+code+')...');
+    attempted++;
+    let res;
+    try{res=await get('/competitions/'+code+'/teams');}
+    catch(e){stop=NETERR;break;}
+    if(res.status===403) deniedCodes.push(code);
+    else if(!res.ok) failed.push(code);
+    else{
+      let data=null;
+      try{data=await res.json();}catch(e){}
+      if(!data) failed.push(code);
+      else{
+        (Array.isArray(data.teams)?data.teams:[]).forEach(t=>{
+          if(!t||!Number.isInteger(t.id)||!t.name) return;
+          const ty=String(t.type||'');
+          const k=/NATIONAL/.test(ty)?'national':(/CLUB/.test(ty)?'club':kind);
+          const r={id:t.id,n:clean(String(t.shortName||t.name)).slice(0,40),f:clean(String(t.name)).slice(0,60),t:String(t.tla||'').slice(0,5),c:safeCrest(t.crest),k:k,a:(t.area&&t.area.name)?String(t.area.name).slice(0,40):''};
+          r.h=hayOf(r);
+          map.set(t.id,r);
+        });
+        teamCache={teams:Array.from(map.values()),updated:Date.now()};
+        saveTeams();
+      }
+    }
+    await pace(res,i===wanted.length-1);
+  }
+  ui.loading=false;
+  let msg;
+  if(stop) msg=stop+(map.size?' Teams loaded so far were saved.':'');
+  else if(!wanted.length) msg='None of the supported competitions are available on your plan.';
+  else if(attempted>0&&deniedCodes.length===attempted) msg='Every request was refused (403). The token is probably wrong, or your plan does not include these competitions.';
+  else{
+    const skipped=notOnPlan.concat(deniedCodes);
+    msg='Done. '+teamCache.teams.length+' teams saved.'+(skipped.length?' Not on your plan: '+skipped.join(', ')+'.':'')+(failed.length?' Could not load: '+failed.join(', ')+'.':'');
+  }
+  setStatus(msg);
+  if(!stop&&map.size&&attempted>deniedCodes.length) toast('Teams loaded');
+}
+function teamsPanel(){
+  return '<details class="card teams"'+(ui.teamsOpen?' open':'')+'><summary data-teams="1"><span class="rt">Teams data</span><span class="mute">'+esc(teamCache.teams.length?teamCache.teams.length+' teams':'not loaded')+'</span></summary>'+
+    '<div class="teamsbody"><p class="mute">Load clubs and national teams once for search and crests. They are saved on this device, so search works offline. Crests show when you are online.</p>'+
+    '<label><span class="lbl">football-data.org token (free)</span><input type="password" id="ftoken" autocomplete="off" placeholder="Paste token" value="'+esc(settings.token||'')+'"></label>'+
+    '<div class="row"><button class="btn small primary" data-act="loadTeams">Save token and load teams</button></div>'+
+    '<p class="mute" id="tstatus" aria-live="polite">'+esc(teamsStatus())+'</p>'+
+    '<p class="mute">The free plan allows 10 requests a minute, so the first load can take a minute or two. Your token stays on this device and is never put in exports.</p></div></details>';
+}
 function shuffle(a){
   a=a.slice();
   for(let i=a.length-1;i>0;i--){const j=Math.floor(Math.random()*(i+1));[a[i],a[j]]=[a[j],a[i]];}
@@ -374,7 +572,7 @@ function leagueSummary(L){
 }
 
 /* ---------- Views ---------- */
-const ui={screen:'home',editing:null,draftCount:4,tab:'table',mdOpen:{}};
+const ui={screen:'home',editing:null,draftCount:4,tab:'table',mdOpen:{},teamsOpen:false,pickedTeam:null,hl:-1,loading:false,loadMsg:''};
 
 function homeView(){
   const list=db.leagues.map(L=>
@@ -385,7 +583,7 @@ function homeView(){
   ).join('');
   return '<div class="row between head"><h2>Your leagues</h2><div class="row"><button class="btn ghost" data-act="importLeague">Import</button><button class="btn primary" data-act="new">New league</button></div>'+
     '<input type="file" id="importFile" accept=".json,application/json" hidden></div>'+
-    (list||'<p class="empty">No leagues yet. Create one and add your players to get started.</p>');
+    (list||'<p class="empty">No leagues yet. Create one and add your players to get started.</p>')+teamsPanel();
 }
 
 function nameInputs(n,vals){
@@ -412,11 +610,13 @@ function createView(){
 
 function pickView(L){
   const i=L.pickIndex,n=L.players.length,p=L.players[i];
-  const order=L.players.map((q,k)=>'<li class="'+(k===i?'now':'')+'"><span style="color:inherit">'+(k+1)+'. '+esc(q.name)+'</span><span>'+(q.team?esc(q.team):'')+'</span></li>').join('');
+  const order=L.players.map((q,k)=>'<li class="'+(k===i?'now':'')+'"><span style="color:inherit">'+(k+1)+'. '+esc(q.name)+'</span><span>'+(q.team?crest(q)+esc(q.team):'')+'</span></li>').join('');
   return '<div class="card pick">'+
     '<p class="mute">Player '+(i+1)+' of '+n+'. Everyone gets a different team.</p>'+
     '<p class="who">'+esc(p.name)+', pick your team</p>'+
-    '<input type="text" id="team" maxlength="40" autocomplete="off" placeholder="Type any team name">'+
+    '<div class="combo"><input type="text" id="team" maxlength="40" autocomplete="off" autocapitalize="words" role="combobox" aria-expanded="false" aria-controls="tlist" placeholder="'+(teamCache.teams.length?'Search clubs and national teams, or type any name':'Type any team name')+'"><ul id="tlist" class="tlist" role="listbox" hidden></ul></div>'+
+    '<p class="pickhint" id="tpreview" aria-live="polite"></p>'+
+    (teamCache.teams.length?'':'<p class="pickhint">No team list loaded yet. Type any name, or load teams from the home screen for search and crests.</p>')+
     '<p class="err" id="err" role="alert" style="margin-top:8px"></p>'+
     '<div class="row" style="margin-top:12px"><button class="btn primary" data-act="pick">Lock in team</button>'+
     (i>0?'<button class="btn ghost" data-act="undo">Undo last pick</button>':'')+'</div>'+
@@ -426,7 +626,7 @@ function pickView(L){
 function sideHtml(L,id,cls,r){
   const p=P(L,id);
   const tag=r.luckyIn===id?'<span class="tag">Best loser</span>':'';
-  return '<div class="side '+cls+'"><span class="pname">'+esc(p.name)+'</span><span class="team">'+esc(p.team)+'</span>'+tag+'</div>';
+  return '<div class="side '+cls+'"><span class="pname">'+esc(p.name)+'</span><span class="team">'+crest(p)+esc(p.team)+'</span>'+tag+'</div>';
 }
 
 function matchView(L,r,ri,m){
@@ -473,7 +673,7 @@ function bracketView(L){
     const p=P(L,L.champion);
     h+='<div class="champ-banner"><p class="mute">Champion</p><p class="big">'+esc(p.name)+' with '+esc(p.team)+'</p></div>';
   }
-  h+='<div class="chips">'+L.players.map(p=>'<span class="chip '+status(L,p.id)+'">'+esc(p.name)+'<em>'+esc(p.team)+'</em></span>').join('')+'</div>';
+  h+='<div class="chips">'+L.players.map(p=>'<span class="chip '+status(L,p.id)+'">'+esc(p.name)+'<em>'+crest(p)+esc(p.team)+'</em></span>').join('')+'</div>';
   if(L.champion) h+=statsView(L);
   h+=L.rounds.map((r,ri)=>({r:r,ri:ri})).reverse().map(o=>roundView(L,o.r,o.ri)).join('');
   h+='<details class="rules"><summary>How advancing works</summary><ul>'+
@@ -511,7 +711,7 @@ function statsView(L){
   const body=rows.map(r=>{
     const p=P(L,r.id);
     return '<tr class="'+(r.pos===1&&r.g>0?'lead':'')+'"><td class="pos">'+r.pos+(r.tied?'=':'')+'</td>'+
-      '<td class="pl"><span class="pname">'+esc(p.name)+'</span><span class="team">'+esc(p.team)+'</span></td>'+
+      '<td class="pl"><span class="pname">'+esc(p.name)+'</span><span class="team">'+crest(p)+esc(p.team)+'</span></td>'+
       '<td class="pts">'+r.g+'</td><td>'+r.n+'</td><td>'+(r.n?(r.g/r.n).toFixed(1):'-')+'</td></tr>';
   }).join('');
   const line=m=>{
@@ -566,7 +766,7 @@ function tableView(L){
   const body=rows.map(r=>{
     const p=P(L,r.id);
     return '<tr class="'+(r.pos===1&&r.p>0?'lead':'')+'"><td class="pos">'+r.pos+(r.tied?'=':'')+'</td>'+
-      '<td class="pl"><span class="pname">'+esc(p.name)+'</span><span class="team">'+esc(p.team)+'</span></td>'+
+      '<td class="pl"><span class="pname">'+esc(p.name)+'</span><span class="team">'+crest(p)+esc(p.team)+'</span></td>'+
       '<td>'+r.p+'</td><td>'+r.w+'</td><td>'+r.d+'</td><td>'+r.l+'</td><td>'+r.gf+'</td><td>'+r.ga+'</td><td>'+fmt(r.gd)+'</td><td class="pts">'+r.pts+'</td></tr>';
   }).join('');
   return '<div class="tablewrap"><table class="lt"><thead><tr><th>#</th><th class="pl" style="text-align:left;background:var(--panel)">Player</th>'+
@@ -597,7 +797,7 @@ function matchdaysView(L){
 function fixtureView(L,f){
   const A=P(L,f.a),B=P(L,f.b);
   const played=f.sa!==null,editing=ui.editing===f.id,locked=L.stage==='done';
-  const side=(p,cls,lab)=>'<div class="side '+cls+'"><span class="pname">'+esc(p.name)+'</span><span class="team">'+esc(p.team)+'</span><span class="ha">'+lab+'</span></div>';
+  const side=(p,cls,lab)=>'<div class="side '+cls+'"><span class="pname">'+esc(p.name)+'</span><span class="team">'+crest(p)+esc(p.team)+'</span><span class="ha">'+lab+'</span></div>';
   const attrs=' data-fid="'+f.id+'"';
   if(played&&!editing){
     const wa=f.sa>f.sb?'win':'',wb=f.sb>f.sa?'win right':'right';
@@ -631,7 +831,7 @@ function render(){
   const t=$('#team');
   if(t) setTimeout(()=>t.focus(),0);
 }
-function go(screen){ui.screen=screen;ui.editing=null;ui.tab='table';ui.mdOpen={};render();window.scrollTo(0,0);}
+function go(screen){ui.screen=screen;ui.editing=null;ui.tab='table';ui.mdOpen={};ui.pickedTeam=null;render();window.scrollTo(0,0);}
 
 /* ---------- Import ---------- */
 function cleanLeague(x){
@@ -647,7 +847,7 @@ function cleanLeague(x){
     if(!p||!idOk(p.id)) return null;
     const name=str(p.name,24);
     if(!name) return null;
-    players.push({id:p.id,name:name,team:p.team==null?null:(str(p.team,40)||null)});
+    players.push({id:p.id,name:name,team:p.team==null?null:(str(p.team,40)||null),teamId:Number.isInteger(p.teamId)?p.teamId:null,badge:safeCrest(p.badge),kind:(p.kind==='club'||p.kind==='national')?p.kind:null});
   }
   const ids=new Set(players.map(p=>p.id));
   if(ids.size!==players.length) return null;
@@ -758,6 +958,14 @@ const actions={
   home(){db.activeId=null;save();go('home');},
   open(b){db.activeId=b.dataset.id;save();go('league');},
   importLeague(){const f=$('#importFile');if(f)f.click();},
+  loadTeams(){
+    if(ui.loading) return toast('Already loading teams.');
+    const tok=(($('#ftoken')||{}).value||'').trim();
+    if(!tok) return toast('Paste your football-data.org token first.');
+    settings.token=tok;saveSettings();
+    ui.teamsOpen=true;ui.loadMsg='';
+    loadTeams(tok);
+  },
   tab(b){ui.tab=b.dataset.t;render();},
   saveFixture(b){
     const L=cur();
@@ -836,9 +1044,14 @@ const actions={
     const input=$('#team'),err=$('#err');
     const v=clean(input.value);
     if(!v) return setErr(err,'Type a team name.');
-    const taken=L.players.find(p=>p.team&&norm(p.team)===norm(v));
-    if(taken) return setErr(err,v+' is already taken by '+taken.name+'. Pick a different team.');
-    L.players[L.pickIndex].team=v;
+    let sel=(ui.pickedTeam&&norm2(ui.pickedTeam.n)===norm2(v))?ui.pickedTeam:null;
+    if(!sel) sel=teamCache.teams.find(t=>norm2(t.n)===norm2(v)||norm2(t.f)===norm2(v))||null;
+    const name=sel?sel.n:v;
+    const taken=L.players.find(p=>p.team&&(norm2(p.team)===norm2(name)||(sel&&p.teamId===sel.id)));
+    if(taken) return setErr(err,name+' is already taken by '+taken.name+'. Pick a different team.');
+    const pl=L.players[L.pickIndex];
+    pl.team=name;pl.teamId=sel?sel.id:null;pl.badge=sel?sel.c:null;pl.kind=sel?sel.k:null;
+    ui.pickedTeam=null;
     L.pickIndex++;
     touch(L);
     if(L.pickIndex>=L.players.length){if(L.format==='league'){startLeague(L);toast('Fixtures ready');}else{startBracket(L);advance(L);toast('Bracket ready');}}
@@ -846,7 +1059,7 @@ const actions={
   },
   undo(){
     const L=cur();if(!L||L.stage!=='picking'||L.pickIndex===0) return;
-    L.pickIndex--;L.players[L.pickIndex].team=null;touch(L);
+    L.pickIndex--;const u=L.players[L.pickIndex];u.team=null;u.teamId=null;u.badge=null;u.kind=null;touch(L);
     save();render();
   },
   edit(b){ui.editing=b.dataset.mid;render();},
@@ -882,9 +1095,79 @@ document.addEventListener('click',e=>{
 document.addEventListener('click',e=>{
   const s=e.target.closest&&e.target.closest('summary[data-md]');
   if(s) ui.mdOpen[+s.dataset.md]=!s.parentElement.open;
+  const s2=e.target.closest&&e.target.closest('summary[data-teams]');
+  if(s2) ui.teamsOpen=!s2.parentElement.open;
+  const o=e.target.closest&&e.target.closest('.topt');
+  if(o){
+    if(!o.classList.contains('taken')){
+      const inp=$('#team');
+      if(o.dataset.custom){ui.pickedTeam=null;setPreview();}
+      else{
+        const t=teamById(+o.dataset.tid);
+        if(t){ui.pickedTeam=t;inp.value=t.n;setPreview();}
+      }
+      hideList();
+      if(inp) inp.focus();
+    }
+  }else if(!(e.target.closest&&e.target.closest('.combo'))) hideList();
+});
+
+/* team combobox helpers */
+function hideList(){
+  const l=$('#tlist'),i=$('#team');
+  if(l) l.hidden=true;
+  if(i) i.setAttribute('aria-expanded','false');
+  ui.hl=-1;
+}
+function setPreview(){
+  const el=$('#tpreview');
+  if(!el) return;
+  const t=ui.pickedTeam;
+  el.innerHTML=t?crestHtml(t.c,t.n)+esc(t.n)+' ('+(t.k==='national'?'National':'Club')+(t.a?', '+esc(t.a):'')+')':'';
+}
+function renderList(){
+  const inp=$('#team'),list=$('#tlist'),L=cur();
+  if(!inp||!list||!L) return;
+  const q=norm2(inp.value);
+  if(!q){hideList();return;}
+  const byId={},byName={};
+  L.players.forEach(p=>{if(p.team){byName[norm2(p.team)]=p;if(p.teamId!=null)byId[p.teamId]=p;}});
+  let html=searchTeams(q).map(t=>{
+    const o=byId[t.id]||byName[norm2(t.n)];
+    return '<li class="topt'+(o?' taken':'')+'" role="option" data-tid="'+t.id+'"'+(o?' aria-disabled="true"':'')+'>'+crestHtml(t.c,t.n)+
+      '<span class="nm">'+esc(t.n)+'</span><small>'+(o?'Taken by '+esc(o.name):(t.k==='national'?'National':'Club')+(t.a?', '+esc(t.a):''))+'</small></li>';
+  }).join('');
+  html+='<li class="topt custom" role="option" data-custom="1">Use "'+esc(clean(inp.value))+'" as a custom team</li>';
+  list.innerHTML=html;
+  list.hidden=false;
+  inp.setAttribute('aria-expanded','true');
+  ui.hl=-1;
+}
+function onTeamInput(inp){
+  if(ui.pickedTeam&&norm2(inp.value)!==norm2(ui.pickedTeam.n)){ui.pickedTeam=null;setPreview();}
+  renderList();
+}
+document.addEventListener('keydown',e=>{
+  if(!e.target||e.target.id!=='team') return;
+  const list=$('#tlist');
+  if(!list||list.hidden) return;
+  const opts=Array.prototype.slice.call(list.querySelectorAll('.topt'));
+  if(e.key==='ArrowDown'||e.key==='ArrowUp'){
+    e.preventDefault();
+    let i=ui.hl+(e.key==='ArrowDown'?1:-1);
+    i=Math.max(0,Math.min(opts.length-1,i));
+    opts.forEach((o,k)=>o.classList.toggle('hl',k===i));
+    ui.hl=i;
+    if(opts[i]&&opts[i].scrollIntoView) opts[i].scrollIntoView({block:'nearest'});
+  }else if(e.key==='Escape'){hideList();}
+  else if(e.key==='Enter'&&ui.hl>=0&&opts[ui.hl]){
+    e.preventDefault();e.stopImmediatePropagation();
+    opts[ui.hl].click();
+  }
 });
 document.addEventListener('input',e=>{
   const t=e.target;
+  if(t.id==='team'){onTeamInput(t);return;}
   if(t.id==='lcount'){
     let n=parseInt(t.value,10);
     if(!(n>=1)) return;
