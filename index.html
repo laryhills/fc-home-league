@@ -275,7 +275,7 @@ const API='https://api.football-data.org/v4';
 // goes through its own /api/fd function (see api/fd.js). Local dev calls the API directly.
 const ON_FILE=location.protocol==='file:';
 const CAN_PROXY=/^https?:$/.test(location.protocol)&&!/^(localhost|127\.0\.0\.1)$/.test(location.hostname);
-const apiUrl=path=>CAN_PROXY?'/api/fd?path='+encodeURIComponent(path):API+path;
+const apiUrl=path=>CAN_PROXY?'/api/fd?path='+encodeURIComponent(path)+(ui.fresh?'&r='+ui.fresh:''):API+path;
 const COMPS=[['PL','club'],['PD','club'],['BL1','club'],['SA','club'],['FL1','club'],['DED','club'],['PPL','club'],['ELC','club'],['BSA','club'],['CL','club'],['WC','national'],['EC','national']];
 const sleep=ms=>new Promise(r=>setTimeout(r,ms));
 function teamsStatus(){
@@ -295,6 +295,8 @@ const hdrNum=(res,name)=>{
 async function loadTeams(token){
   if(ui.loading) return;
   ui.loading=true;
+  // First load may use the server's saved copy. A refresh (list already on this device) skips it.
+  ui.fresh=teamCache.teams.length?String(Date.now()):'';
   const map=new Map(teamCache.teams.map(t=>[t.id,t]));
   const NETERR='Could not reach football-data.org. You may be offline, or the browser blocked the request.';
   let stop=null;
@@ -302,6 +304,7 @@ async function loadTeams(token){
   // otherwise fall back to a fixed gap that stays under 10 requests a minute.
   const pace=async(res,last)=>{
     if(last) return;
+    if(res&&res.headers&&res.headers.get&&res.headers.get('X-Vercel-Cache')==='HIT'){await sleep(50);return;} // saved copy: no API request was spent
     const left=hdrNum(res,'X-RequestsAvailable'),reset=hdrNum(res,'X-RequestCounter-Reset');
     if(left!==null){
       if(left<=0){
@@ -389,7 +392,7 @@ function teamsPanel(){
   return '<details class="card teams"'+(ui.teamsOpen?' open':'')+'><summary data-teams="1"><span class="rt">Teams data</span><span class="mute">'+esc(teamCache.teams.length?teamCache.teams.length+' teams':'not loaded')+'</span></summary>'+
     '<div class="teamsbody"><p class="mute">Load clubs and national teams once for search and crests. They are saved on this device, so search works offline. Crests show when you are online.</p>'+
     '<label><span class="lbl">football-data.org token (free)'+(CAN_PROXY?' - optional if the server has one':'')+'</span><input type="password" id="ftoken" autocomplete="off" placeholder="Paste token" value="'+esc(settings.token||'')+'"></label>'+
-    '<div class="row"><button class="btn small primary" data-act="loadTeams">Save token and load teams</button></div>'+
+    '<div class="row"><button class="btn small primary" data-act="loadTeams">'+(teamCache.teams.length?'Refresh teams':'Save token and load teams')+'</button></div>'+
     '<p class="mute" id="tstatus" aria-live="polite">'+esc(teamsStatus())+'</p>'+
     '<p class="mute">The free plan allows 10 requests a minute, so the first load can take a minute or two. Your token stays on this device and is never put in exports.</p></div></details>';
 }
