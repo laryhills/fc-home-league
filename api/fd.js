@@ -26,10 +26,11 @@ module.exports = async (req, res) => {
     });
     res.setHeader('Content-Type', 'application/json; charset=utf-8');
     res.setHeader('X-Content-Type-Options', 'nosniff');
-    // Team lists are public and change rarely: let Vercel's CDN keep them for a day.
+    // Team lists change rarely: keep the saved copy for a year. The page adds &r=<time> when you
+    // press Refresh, which skips the saved copy and stores a new one.
     res.setHeader(
       'Cache-Control',
-      r.ok && path.endsWith('/teams') ? 'public, s-maxage=86400, stale-while-revalidate=604800' : 'no-store'
+      r.ok && path.endsWith('/teams') ? 'public, s-maxage=31536000' : 'no-store'
     );
     res.status(r.status).send(body);
   } catch (e) {
