@@ -271,6 +271,11 @@ function searchTeams(q){
 }
 
 const API='https://api.football-data.org/v4';
+// football-data.org only allows browser calls from http://localhost, so a hosted page
+// goes through its own /api/fd function (see api/fd.js). Local dev calls the API directly.
+const ON_FILE=location.protocol==='file:';
+const CAN_PROXY=/^https?:$/.test(location.protocol)&&!/^(localhost|127\.0\.0\.1)$/.test(location.hostname);
+const apiUrl=path=>CAN_PROXY?'/api/fd?path='+encodeURIComponent(path):API+path;
 const COMPS=[['PL','club'],['PD','club'],['BL1','club'],['SA','club'],['FL1','club'],['DED','club'],['PPL','club'],['ELC','club'],['BSA','club'],['CL','club'],['WC','national'],['EC','national']];
 const sleep=ms=>new Promise(r=>setTimeout(r,ms));
 function teamsStatus(){
@@ -309,7 +314,7 @@ async function loadTeams(token){
   const get=async path=>{
     let tries=0;
     while(true){
-      const res=await fetch(API+path,{headers:{'X-Auth-Token':token}});
+      const res=await fetch(apiUrl(path),{headers:token?{'X-Auth-Token':token}:{}});
       if(res.status===429&&tries<2){
         tries++;
         const r=hdrNum(res,'X-RequestCounter-Reset');
@@ -383,7 +388,7 @@ async function loadTeams(token){
 function teamsPanel(){
   return '<details class="card teams"'+(ui.teamsOpen?' open':'')+'><summary data-teams="1"><span class="rt">Teams data</span><span class="mute">'+esc(teamCache.teams.length?teamCache.teams.length+' teams':'not loaded')+'</span></summary>'+
     '<div class="teamsbody"><p class="mute">Load clubs and national teams once for search and crests. They are saved on this device, so search works offline. Crests show when you are online.</p>'+
-    '<label><span class="lbl">football-data.org token (free)</span><input type="password" id="ftoken" autocomplete="off" placeholder="Paste token" value="'+esc(settings.token||'')+'"></label>'+
+    '<label><span class="lbl">football-data.org token (free)'+(CAN_PROXY?' - optional if the server has one':'')+'</span><input type="password" id="ftoken" autocomplete="off" placeholder="Paste token" value="'+esc(settings.token||'')+'"></label>'+
     '<div class="row"><button class="btn small primary" data-act="loadTeams">Save token and load teams</button></div>'+
     '<p class="mute" id="tstatus" aria-live="polite">'+esc(teamsStatus())+'</p>'+
     '<p class="mute">The free plan allows 10 requests a minute, so the first load can take a minute or two. Your token stays on this device and is never put in exports.</p></div></details>';
@@ -960,8 +965,9 @@ const actions={
   importLeague(){const f=$('#importFile');if(f)f.click();},
   loadTeams(){
     if(ui.loading) return toast('Already loading teams.');
+    if(ON_FILE){ui.teamsOpen=true;return setStatus('Loading teams needs the page to be hosted (for example on Vercel). Opened as a file, the browser blocks the request. Custom team names still work.');}
     const tok=(($('#ftoken')||{}).value||'').trim();
-    if(!tok) return toast('Paste your football-data.org token first.');
+    if(!tok&&!CAN_PROXY) return toast('Paste your football-data.org token first.');
     settings.token=tok;saveSettings();
     ui.teamsOpen=true;ui.loadMsg='';
     loadTeams(tok);
